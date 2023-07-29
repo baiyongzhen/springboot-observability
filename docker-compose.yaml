@@ -1,0 +1,166 @@
+version: '3.9'
+
+x-default-logging: &logging
+  driver: "json-file"
+  options:
+    max-size: "5m"
+    max-file: "2"
+
+services:
+  app-a:
+    build: 
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: app-a
+    environment:
+      TARGET_ONE_HOST: app-b
+      TARGET_TWO_HOST: app-c
+      SERVER_PORT: 8080
+      MANAGEMENT_SERVER_PORT: 8081
+      MANAGEMENT_METRICS_TAGS_APPLICATION: app-a
+      JAVA_TOOL_OPTIONS: "-javaagent:./otelagent/opentelemetry-javaagent.jar"
+      OTEL_PROPAGATORS: tracecontext,baggage,ottrace      
+      OTEL_SDK_DISABLED: false 
+      OTEL_METRICS_EXPORTER: none
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otelcol:4318/v1/traces
+      OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: http/protobuf
+      OTEL_LOGS_EXPORTER: otlp # otlp,logging,none
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://otelcol:4318/v1/logs 
+      OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.name=app-a,compose_service=app-a
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    depends_on:
+      - otelcol
+
+  app-b:
+    build: 
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: app-b
+    environment:
+      TARGET_ONE_HOST: app-a
+      TARGET_TWO_HOST: app-c
+      SERVER_PORT: 8080
+      MANAGEMENT_SERVER_PORT: 8081
+      MANAGEMENT_METRICS_TAGS_APPLICATION: app-b
+      JAVA_TOOL_OPTIONS: "-javaagent:./otelagent/opentelemetry-javaagent.jar"
+      OTEL_PROPAGATORS: tracecontext,baggage,ottrace      
+      OTEL_SDK_DISABLED: false 
+      OTEL_METRICS_EXPORTER: none
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otelcol:4318/v1/traces
+      OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: http/protobuf
+      OTEL_LOGS_EXPORTER: otlp # otlp,logging,none
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://otelcol:4318/v1/logs 
+      OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.name=app-b,compose_service=app-b
+    ports:
+      - "8082:8080"
+      - "8083:8081"
+    depends_on:
+      - otelcol
+
+  app-c:
+    build: 
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: app-c
+    environment:
+      TARGET_ONE_HOST: app-a
+      TARGET_TWO_HOST: app-b
+      SERVER_PORT: 8080
+      MANAGEMENT_SERVER_PORT: 8081
+      MANAGEMENT_METRICS_TAGS_APPLICATION: app-b
+      JAVA_TOOL_OPTIONS: "-javaagent:./otelagent/opentelemetry-javaagent.jar"
+      OTEL_PROPAGATORS: tracecontext,baggage,ottrace      
+      OTEL_SDK_DISABLED: false 
+      OTEL_METRICS_EXPORTER: none
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otelcol:4318/v1/traces
+      OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: http/protobuf
+      OTEL_LOGS_EXPORTER: otlp # otlp,logging,none
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://otelcol:4318/v1/logs 
+      OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.name=app-c,compose_service=app-c
+    ports:
+      - "8084:8080"
+      - "8085:8081"
+    depends_on:
+      - otelcol
+
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.67.0 # 0.79.0
+    container_name: otel-col
+    command: [ "--config=/etc/otelcol-config.yml", "--config=/etc/otelcol-config-extras.yml"]
+    volumes:
+      - ./config/otelcol/otelcol-config.yml:/etc/otelcol-config.yml
+      - ./config/otelcol/otelcol-config-extras.yml:/etc/otelcol-config-extras.yml          
+    ports:
+      - "4317:4317"     # OTLP over gRPC receiver
+      - "4318:4318"     # OTLP over HTTP receiver
+#      - "9464:9464"     # Prometheus exporter
+      - "8888:8888"     # metrics endpoint
+      - '8006:8006'     # Fluentd forward receiver
+      - '8006:8006/udp' # Fluentd forward receiver
+      - '3500:3500'     # Loki HTTP receiver
+      - '3600:3600'     # Loki gRPC receiver
+
+  # Infrastructure
+  loki:
+    image: grafana/loki:2.8.0
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    logging: *logging
+
+  prometheus:
+    image: prom/prometheus:v2.43.0
+    container_name: prometheus
+    command:
+      - --web.console.templates=/etc/prometheus/consoles
+      - --web.console.libraries=/etc/prometheus/console_libraries
+      - --storage.tsdb.retention.time=1h
+      - --config.file=/etc/prometheus/prometheus-config.yaml
+      - --enable-feature=exemplar-storage # exemplar
+      #- --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+      - --web.route-prefix=/
+      - --web.enable-remote-write-receiver
+    volumes:
+      - ./config/prometheus/prometheus.yaml:/etc/prometheus/prometheus-config.yaml      
+    ports:
+      - "9090:9090"
+    depends_on:
+      - loki
+    logging: *logging
+
+  tempo:
+    image: grafana/tempo:2.0.1
+    command: [ "--target=all", "--storage.trace.backend=local", "--storage.trace.local.path=/var/tempo", "--auth.enabled=false" ]
+    ports:
+      - "14317:4317"  # Tempo gRPC receiver
+      - "14250:14250"
+    depends_on:
+      - loki
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:9.4.3
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./config/grafana/provisioning/dashboards/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./config/grafana/dashboards:/etc/grafana/dashboards
+    depends_on:
+      - loki
+      - prometheus
+      - tempo
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+    logging: *logging

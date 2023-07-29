@@ -17,4 +17,5 @@
 
 # 참고사이트
 - https://opentelemetry.io/docs/instrumentation/java/getting-started/
+- https://github.com/blueswen/spring-boot-observability
 - https://coroot.com/docs/coroot-community-edition/tracing/opentelemetry-java

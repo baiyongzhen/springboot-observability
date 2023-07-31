@@ -88,7 +88,6 @@ public class Controller {
         restTemplate.getForEntity(String.format("http://%s:8080/io_task", TARGET_ONE_HOST), String.class);
         restTemplate.getForEntity(String.format("http://%s:8080/cpu_task", TARGET_TWO_HOST), String.class);
 
-
         logger.debug("chain is finished");
         return "chain";
     }
